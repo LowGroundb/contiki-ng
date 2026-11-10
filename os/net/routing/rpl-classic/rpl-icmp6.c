@@ -369,6 +369,8 @@ dio_input(void)
     LOG_DBG("Incoming DIO (option, length) = (%u, %u)\n",
             subopt_type, len);
 
+        /* TODO: Add a CPU-load option case; validate its length and value, then
+           store the decoded metric in dio. */
     switch(subopt_type) {
     case RPL_OPTION_PAD1:
     case RPL_OPTION_PADN:
@@ -608,6 +610,9 @@ dio_output(rpl_instance_t *instance, uip_ipaddr_t *uc_addr)
   buffer[pos++] = instance->default_lifetime;
   set16(buffer, pos, instance->lifetime_unit);
   pos += 2;
+
+    /* TODO: Append the CPU-load option here (type, length, sampled value).
+      Decide how intermediate nodes will propagate a gateway's load. */
 
   /* Check if we have a prefix to send also. */
   if(dag->prefix_info.length > 0) {

@@ -149,6 +149,7 @@ parent_path_cost(rpl_parent_t *p)
     return 0xffff;
   }
 
+  /* TODO: Include a normalized gateway-load cost alongside the path metric. */
 #if RPL_WITH_MC
   /* Handle the different MC types */
   switch(p->dag->instance->mc.type) {
@@ -224,6 +225,7 @@ best_parent(rpl_parent_t *p1, rpl_parent_t *p2)
   }
 
   dag = p1->dag; /* Both parents are in the same DAG. */
+  /* TODO: Keep load-aware cost comparison consistent with switch hysteresis. */
   p1_cost = parent_path_cost(p1);
   p2_cost = parent_path_cost(p2);
 
@@ -241,6 +243,7 @@ best_parent(rpl_parent_t *p1, rpl_parent_t *p2)
 static rpl_dag_t *
 best_dag(rpl_dag_t *d1, rpl_dag_t *d2)
 {
+  /* TODO: Include gateway load here if alternatives are separate DODAGs. */
   if(d1->grounded != d2->grounded) {
     return d1->grounded ? d1 : d2;
   }

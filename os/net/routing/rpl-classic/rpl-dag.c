@@ -717,6 +717,7 @@ rpl_add_parent(rpl_dag_t *dag, rpl_dio_t *dio, uip_ipaddr_t *addr)
       LOG_DBG("rpl_add_parent p NULL\n");
     } else {
       p->dag = dag;
+      /* TODO: Copy the decoded CPU-load metric from dio into this parent. */
       p->rank = dio->rank;
       p->dtsn = dio->dtsn;
 #if RPL_WITH_MC
@@ -1260,6 +1261,7 @@ rpl_add_dag(uip_ipaddr_t *from, rpl_dio_t *dio)
       rpl_move_parent(previous_dag, dag, p);
     }
   }
+  /* TODO: Refresh the stored CPU-load metric when this parent's DIO arrives. */
   p->rank = dio->rank;
 
   /* Determine the objective function by using the objective code
