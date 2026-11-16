@@ -89,6 +89,7 @@
 #define RPL_OPTION_PREFIX_INFO           8
 #define RPL_OPTION_TARGET_DESC           9
 /* TODO: Assign a non-conflicting option ID for the private CPU-load option. */
+#define RPL_OPTION_CPU_LOAD              0x67
 
 #define RPL_DAO_K_FLAG                   0x80 /* DAO ACK requested */
 #define RPL_DAO_D_FLAG                   0x40 /* DODAG ID present */
@@ -228,6 +229,7 @@
 /* Logical representation of a DAG Information Object (DIO.) */
 struct rpl_dio {
   /* TODO: Add the parsed CPU-load value here once its wire format is defined. */
+  uint8_t cpu_load; /* CPU load value from the RPL_OPTION_CPU_LOAD option */
   uip_ipaddr_t dag_id;
   rpl_ocp_t ocp;
   rpl_rank_t rank;

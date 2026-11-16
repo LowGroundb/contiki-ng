@@ -487,6 +487,15 @@ dio_input(void)
       LOG_INFO("Copying prefix information\n");
       memcpy(&dio.prefix_info.prefix, &buffer[i + 16], 16);
       break;
+    case RPL_OPTION_CPU_LOAD:
+      if(len != 3) {
+        LOG_WARN("Invalid CPU-load option, len != 3\n");
+        RPL_STAT(rpl_stats.malformed_msgs++);
+        goto discard;
+      }
+      dio.cpu_load = buffer[i + 2];
+      LOG_INFO("CPU-load option: %u\n", (unsigned)dio.cpu_load);
+      break;
     default:
       LOG_WARN("Unsupported suboption type in DIO: %u\n",
                (unsigned)subopt_type);
@@ -613,7 +622,12 @@ dio_output(rpl_instance_t *instance, uip_ipaddr_t *uc_addr)
 
     /* TODO: Append the CPU-load option here (type, length, sampled value).
       Decide how intermediate nodes will propagate a gateway's load. */
-
+  if(instance->cpu_load != RPL_INFINITE_RANK) {
+    buffer[pos++] = RPL_OPTION_CPU_LOAD;
+    buffer[pos++] = 1; /* length */
+    buffer[pos++] = instance->cpu_load;
+    LOG_DBG("Sending CPU-load option in DIO: %u\n", (unsigned)instance->cpu_load);
+  }
   /* Check if we have a prefix to send also. */
   if(dag->prefix_info.length > 0) {
     buffer[pos++] = RPL_OPTION_PREFIX_INFO;

@@ -119,6 +119,7 @@ struct rpl_parent {
   rpl_metric_container_t mc;
 #endif /* RPL_WITH_MC */
   /* TODO: Store the gateway-load value received or propagated in its DIO. */
+  uint8_t cpu_load; /* CPU load value from the RPL_OPTION_CPU_LOAD option */
   rpl_rank_t rank;
   uint8_t dtsn;
   uint8_t flags;
