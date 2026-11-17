@@ -88,7 +88,6 @@
 #define RPL_OPTION_SOLICITED_INFO        7
 #define RPL_OPTION_PREFIX_INFO           8
 #define RPL_OPTION_TARGET_DESC           9
-/* TODO: Assign a non-conflicting option ID for the private CPU-load option. */
 #define RPL_OPTION_CPU_LOAD              0x67
 
 #define RPL_DAO_K_FLAG                   0x80 /* DAO ACK requested */
@@ -100,6 +99,12 @@
 #define RPL_DAO_ACK_UNABLE_TO_ADD_ROUTE_AT_ROOT 255 /* root can not accept */
 
 #define RPL_DAO_ACK_TIMEOUT              -1
+
+#ifndef RPL_CONF_CPU_LOAD_SAMPLE_INTERVAL
+#define RPL_CPU_LOAD_SAMPLE_INTERVAL     (CLOCK_SECOND * 10)
+#else /* RPL_CONF_CPU_LOAD_SAMPLE_INTERVAL */
+#define RPL_CPU_LOAD_SAMPLE_INTERVAL     RPL_CONF_CPU_LOAD_SAMPLE_INTERVAL
+#endif /* RPL_CONF_CPU_LOAD_SAMPLE_INTERVAL */
 
 /*---------------------------------------------------------------------------*/
 /* RPL IPv6 extension header option. */
@@ -228,8 +233,8 @@
 /*---------------------------------------------------------------------------*/
 /* Logical representation of a DAG Information Object (DIO.) */
 struct rpl_dio {
-  /* TODO: Add the parsed CPU-load value here once its wire format is defined. */
   uint8_t cpu_load; /* CPU load value from the RPL_OPTION_CPU_LOAD option */
+  uint8_t cpu_load_present;
   uip_ipaddr_t dag_id;
   rpl_ocp_t ocp;
   rpl_rank_t rank;

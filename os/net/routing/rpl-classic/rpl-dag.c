@@ -71,6 +71,85 @@ void RPL_CALLBACK_PARENT_SWITCH(rpl_parent_t *old, rpl_parent_t *new);
 extern rpl_of_t rpl_of0, rpl_mrhof;
 static rpl_of_t *const objective_functions[] = RPL_SUPPORTED_OFS;
 
+static void
+update_dag_gateway_cpu_load(rpl_dag_t *dag)
+{
+  rpl_parent_t *parent;
+
+  if(dag == NULL || dag->instance == NULL) {
+    return;
+  }
+
+  if(dag->rank == ROOT_RANK(dag->instance)) {
+    dag->gateway_cpu_load_valid = dag->instance->cpu_load_valid;
+    if(dag->gateway_cpu_load_valid) {
+      dag->gateway_cpu_load = dag->instance->cpu_load;
+    }
+    return;
+  }
+
+  parent = dag->preferred_parent;
+  dag->gateway_cpu_load_valid = parent != NULL &&
+    (parent->flags & RPL_PARENT_FLAG_CPU_LOAD_VALID);
+  if(dag->gateway_cpu_load_valid) {
+    dag->gateway_cpu_load = parent->cpu_load;
+  }
+}
+
+#if ENERGEST_CONF_ON
+static void
+sample_root_cpu_load(void *ptr)
+{
+  rpl_instance_t *instance = ptr;
+  uint64_t cpu_time;
+  uint64_t total_time;
+  uint64_t delta_cpu_time;
+  uint64_t delta_total_time;
+
+  if(instance == NULL || !instance->used || instance->current_dag == NULL ||
+     instance->current_dag->rank != ROOT_RANK(instance)) {
+    return;
+  }
+
+  energest_flush();
+  cpu_time = energest_type_time(ENERGEST_TYPE_CPU);
+  total_time = ENERGEST_GET_TOTAL_TIME();
+  delta_cpu_time = cpu_time - instance->cpu_load_last_cpu_time;
+  delta_total_time = total_time - instance->cpu_load_last_total_time;
+
+  if(delta_total_time > 0) {
+    if(delta_cpu_time > delta_total_time) {
+      delta_cpu_time = delta_total_time;
+    }
+    instance->cpu_load = (uint8_t)((delta_cpu_time * 255 + delta_total_time / 2) /
+                                   delta_total_time);
+    instance->cpu_load_valid = 1;
+  }
+
+  for(uint8_t i = 0; i < RPL_MAX_DAG_PER_INSTANCE; i++) {
+    if(instance->dag_table[i].used) {
+      update_dag_gateway_cpu_load(&instance->dag_table[i]);
+    }
+  }
+
+  instance->cpu_load_last_cpu_time = cpu_time;
+  instance->cpu_load_last_total_time = total_time;
+  ctimer_set(&instance->cpu_load_timer, RPL_CPU_LOAD_SAMPLE_INTERVAL,
+             sample_root_cpu_load, instance);
+}
+
+static void
+start_root_cpu_load_sampling(rpl_instance_t *instance)
+{
+  energest_flush();
+  instance->cpu_load_last_cpu_time = energest_type_time(ENERGEST_TYPE_CPU);
+  instance->cpu_load_last_total_time = ENERGEST_GET_TOTAL_TIME();
+  instance->cpu_load_valid = 0;
+  ctimer_set(&instance->cpu_load_timer, RPL_CPU_LOAD_SAMPLE_INTERVAL,
+             sample_root_cpu_load, instance);
+}
+#endif /* ENERGEST_CONF_ON */
+
 /*---------------------------------------------------------------------------*/
 /* RPL definitions. */
 
@@ -239,7 +318,11 @@ rpl_parent_is_reachable(rpl_parent_t *p)
 static void
 rpl_set_preferred_parent(rpl_dag_t *dag, rpl_parent_t *p)
 {
-  if(dag == NULL || dag->preferred_parent == p) {
+  if(dag == NULL) {
+    return;
+  }
+  if(dag->preferred_parent == p) {
+    update_dag_gateway_cpu_load(dag);
     return;
   }
 
@@ -266,6 +349,7 @@ rpl_set_preferred_parent(rpl_dag_t *dag, rpl_parent_t *p)
   nbr_table_unlock(rpl_parents, dag->preferred_parent);
   nbr_table_lock(rpl_parents, p);
   dag->preferred_parent = p;
+  update_dag_gateway_cpu_load(dag);
 }
 /*---------------------------------------------------------------------------*/
 /* Greater-than function for the lollipop counter.                      */
@@ -438,8 +522,14 @@ rpl_set_root(uint8_t instance_id, uip_ipaddr_t *dag_id)
 
   instance->current_dag = dag;
   instance->dtsn_out = RPL_LOLLIPOP_INIT;
+  instance->cpu_load_valid = 0;
+  update_dag_gateway_cpu_load(dag);
   instance->of->update_metric_container(instance);
   default_instance = instance;
+
+#if ENERGEST_CONF_ON
+  start_root_cpu_load_sampling(instance);
+#endif /* ENERGEST_CONF_ON */
 
   LOG_INFO("Node set to be a DAG root with DAG ID ");
   LOG_INFO_6ADDR(&dag->dag_id);
@@ -662,6 +752,9 @@ rpl_free_instance(rpl_instance_t *instance)
   ctimer_stop(&instance->dio_timer);
   ctimer_stop(&instance->dao_timer);
   ctimer_stop(&instance->dao_lifetime_timer);
+#if ENERGEST_CONF_ON
+  ctimer_stop(&instance->cpu_load_timer);
+#endif /* ENERGEST_CONF_ON */
 
   if(default_instance == instance) {
     default_instance = NULL;
@@ -698,6 +791,17 @@ rpl_free_dag(rpl_dag_t *dag)
   dag->used = 0;
 }
 /*---------------------------------------------------------------------------*/
+static void
+update_parent_cpu_load(rpl_parent_t *parent, const rpl_dio_t *dio)
+{
+  if(dio->cpu_load_present) {
+    parent->cpu_load = dio->cpu_load;
+    parent->flags |= RPL_PARENT_FLAG_CPU_LOAD_VALID;
+  } else {
+    parent->flags &= ~RPL_PARENT_FLAG_CPU_LOAD_VALID;
+  }
+}
+/*---------------------------------------------------------------------------*/
 rpl_parent_t *
 rpl_add_parent(rpl_dag_t *dag, rpl_dio_t *dio, uip_ipaddr_t *addr)
 {
@@ -717,8 +821,7 @@ rpl_add_parent(rpl_dag_t *dag, rpl_dio_t *dio, uip_ipaddr_t *addr)
       LOG_DBG("rpl_add_parent p NULL\n");
     } else {
       p->dag = dag;
-      /* TODO: Copy the decoded CPU-load metric from dio into this parent. */
-      p->cpu_load = dio->cpu_load;
+      update_parent_cpu_load(p, dio);
       p->rank = dio->rank;
       p->dtsn = dio->dtsn;
 #if RPL_WITH_MC
@@ -1262,8 +1365,7 @@ rpl_add_dag(uip_ipaddr_t *from, rpl_dio_t *dio)
       rpl_move_parent(previous_dag, dag, p);
     }
   }
-  /* TODO: Refresh the stored CPU-load metric when this parent's DIO arrives. */
-  p->cpu_load = dio->cpu_load;
+  update_parent_cpu_load(p, dio);
   p->rank = dio->rank;
 
   /* Determine the objective function by using the objective code
@@ -1649,6 +1751,7 @@ rpl_process_dio(uip_ipaddr_t *from, rpl_dio_t *dio)
       }
     }
   }
+  update_parent_cpu_load(p, dio);
   p->rank = dio->rank;
 
   if(dio->rank == RPL_INFINITE_RANK && p == dag->preferred_parent) {

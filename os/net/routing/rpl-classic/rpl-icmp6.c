@@ -369,8 +369,6 @@ dio_input(void)
     LOG_DBG("Incoming DIO (option, length) = (%u, %u)\n",
             subopt_type, len);
 
-        /* TODO: Add a CPU-load option case; validate its length and value, then
-           store the decoded metric in dio. */
     switch(subopt_type) {
     case RPL_OPTION_PAD1:
     case RPL_OPTION_PADN:
@@ -488,12 +486,13 @@ dio_input(void)
       memcpy(&dio.prefix_info.prefix, &buffer[i + 16], 16);
       break;
     case RPL_OPTION_CPU_LOAD:
-      if(len != 3) {
-        LOG_WARN("Invalid CPU-load option, len != 3\n");
+      if(buffer[i + 1] != 1) {
+        LOG_WARN("Invalid CPU-load option, payload length != 1\n");
         RPL_STAT(rpl_stats.malformed_msgs++);
         goto discard;
       }
       dio.cpu_load = buffer[i + 2];
+      dio.cpu_load_present = 1;
       LOG_INFO("CPU-load option: %u\n", (unsigned)dio.cpu_load);
       break;
     default:
@@ -518,6 +517,8 @@ dio_output(rpl_instance_t *instance, uip_ipaddr_t *uc_addr)
   unsigned char *buffer;
   int pos;
   int is_root;
+  uint8_t cpu_load;
+  uint8_t cpu_load_valid;
   rpl_dag_t *dag = instance->current_dag;
 #if !RPL_LEAF_ONLY
   uip_ipaddr_t addr;
@@ -536,6 +537,8 @@ dio_output(rpl_instance_t *instance, uip_ipaddr_t *uc_addr)
   pos = 0;
 
   buffer = UIP_ICMP_PAYLOAD;
+  cpu_load = 0;
+  cpu_load_valid = 0;
   buffer[pos++] = instance->instance_id;
   buffer[pos++] = dag->version;
   is_root = (dag->rank == ROOT_RANK(instance));
@@ -620,13 +623,18 @@ dio_output(rpl_instance_t *instance, uip_ipaddr_t *uc_addr)
   set16(buffer, pos, instance->lifetime_unit);
   pos += 2;
 
-    /* TODO: Append the CPU-load option here (type, length, sampled value).
-      Decide how intermediate nodes will propagate a gateway's load. */
-  if(instance->cpu_load != RPL_INFINITE_RANK) {
+  if(is_root && instance->cpu_load_valid) {
+    cpu_load = instance->cpu_load;
+    cpu_load_valid = 1;
+  } else if(dag->gateway_cpu_load_valid) {
+    cpu_load = dag->gateway_cpu_load;
+    cpu_load_valid = 1;
+  }
+  if(cpu_load_valid) {
     buffer[pos++] = RPL_OPTION_CPU_LOAD;
     buffer[pos++] = 1; /* length */
-    buffer[pos++] = instance->cpu_load;
-    LOG_DBG("Sending CPU-load option in DIO: %u\n", (unsigned)instance->cpu_load);
+    buffer[pos++] = cpu_load;
+    LOG_DBG("Sending CPU-load option in DIO: %u\n", (unsigned)cpu_load);
   }
   /* Check if we have a prefix to send also. */
   if(dag->prefix_info.length > 0) {

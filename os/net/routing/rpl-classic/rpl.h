@@ -42,6 +42,7 @@
 #include "lib/list.h"
 #include "net/ipv6/uip.h"
 #include "net/ipv6/uip-ds6.h"
+#include "sys/energest.h"
 #include "sys/ctimer.h"
 
 /*---------------------------------------------------------------------------*/
@@ -112,14 +113,14 @@ struct rpl_dag;
 /*---------------------------------------------------------------------------*/
 #define RPL_PARENT_FLAG_UPDATED           0x1
 #define RPL_PARENT_FLAG_LINK_METRIC_VALID 0x2
+#define RPL_PARENT_FLAG_CPU_LOAD_VALID    0x4
 
 struct rpl_parent {
   struct rpl_dag *dag;
 #if RPL_WITH_MC
   rpl_metric_container_t mc;
 #endif /* RPL_WITH_MC */
-  /* TODO: Store the gateway-load value received or propagated in its DIO. */
-  uint8_t cpu_load; /* CPU load value from the RPL_OPTION_CPU_LOAD option */
+  uint8_t cpu_load; /* Gateway-load value advertised through this parent */
   rpl_rank_t rank;
   uint8_t dtsn;
   uint8_t flags;
@@ -147,6 +148,8 @@ struct rpl_dag {
   /* live data for the DAG */
   uint8_t joined;
   rpl_parent_t *preferred_parent;
+  uint8_t gateway_cpu_load;
+  uint8_t gateway_cpu_load_valid;
   rpl_rank_t rank;
   struct rpl_instance *instance;
   rpl_prefix_t prefix_info;
@@ -229,6 +232,13 @@ struct rpl_instance {
   rpl_dag_t dag_table[RPL_MAX_DAG_PER_INSTANCE];
   /* The current default router -- used for routing "upwards". */
   uip_ds6_defrt_t *def_route;
+  uint8_t cpu_load; /* Locally measured load, used by edge routers */
+  uint8_t cpu_load_valid;
+#if ENERGEST_CONF_ON
+  struct ctimer cpu_load_timer;
+  uint64_t cpu_load_last_cpu_time;
+  uint64_t cpu_load_last_total_time;
+#endif /* ENERGEST_CONF_ON */
   uint8_t instance_id;
   uint8_t used;
   uint8_t dtsn_out;

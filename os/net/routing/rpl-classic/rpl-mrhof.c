@@ -78,6 +78,16 @@
 #define RPL_MRHOF_SQUARED_ETX 0
 #endif /* RPL_MRHOF_CONF_SQUARED_ETX */
 
+#ifndef RPL_MRHOF_CONF_CPU_LOAD_WEIGHT
+#define RPL_MRHOF_CPU_LOAD_WEIGHT 50
+#else /* RPL_MRHOF_CONF_CPU_LOAD_WEIGHT */
+#define RPL_MRHOF_CPU_LOAD_WEIGHT RPL_MRHOF_CONF_CPU_LOAD_WEIGHT
+#endif /* RPL_MRHOF_CONF_CPU_LOAD_WEIGHT */
+
+#if RPL_MRHOF_CPU_LOAD_WEIGHT < 0 || RPL_MRHOF_CPU_LOAD_WEIGHT > 100
+#error RPL_MRHOF_CONF_CPU_LOAD_WEIGHT must be between 0 and 100
+#endif
+
 #if !RPL_MRHOF_SQUARED_ETX
 /* Configuration parameters of RFC6719. Reject parents that have a higher
    link metric than the following. The default value is 512 but we use 1024. */
@@ -144,12 +154,13 @@ static uint16_t
 parent_path_cost(rpl_parent_t *p)
 {
   uint16_t base;
+  uint16_t normalized_cpu_load;
+  uint16_t weighted_cpu_load;
 
   if(p == NULL || p->dag == NULL || p->dag->instance == NULL) {
     return 0xffff;
   }
 
-  /* TODO: Include a normalized gateway-load cost alongside the path metric. */
 #if RPL_WITH_MC
   /* Handle the different MC types */
   switch(p->dag->instance->mc.type) {
@@ -167,8 +178,12 @@ parent_path_cost(rpl_parent_t *p)
   base = p->rank;
 #endif /* RPL_WITH_MC */
 
+  normalized_cpu_load = (p->flags & RPL_PARENT_FLAG_CPU_LOAD_VALID) ?
+    (uint32_t)p->cpu_load * 100 / 255 : 100;
+  weighted_cpu_load = (uint32_t)normalized_cpu_load * RPL_MRHOF_CPU_LOAD_WEIGHT / 100;
+
   /* path cost upper bound: 0xffff */
-  return MIN((uint32_t)base + parent_link_metric(p), 0xffff);
+  return MIN((uint32_t)base + parent_link_metric(p) + weighted_cpu_load, 0xffff);
 }
 /*---------------------------------------------------------------------------*/
 static rpl_rank_t
@@ -225,7 +240,6 @@ best_parent(rpl_parent_t *p1, rpl_parent_t *p2)
   }
 
   dag = p1->dag; /* Both parents are in the same DAG. */
-  /* TODO: Keep load-aware cost comparison consistent with switch hysteresis. */
   p1_cost = parent_path_cost(p1);
   p2_cost = parent_path_cost(p2);
 
@@ -243,13 +257,23 @@ best_parent(rpl_parent_t *p1, rpl_parent_t *p2)
 static rpl_dag_t *
 best_dag(rpl_dag_t *d1, rpl_dag_t *d2)
 {
-  /* TODO: Include gateway load here if alternatives are separate DODAGs. */
+  uint16_t d1_cost;
+  uint16_t d2_cost;
+
   if(d1->grounded != d2->grounded) {
     return d1->grounded ? d1 : d2;
   }
 
   if(d1->preference != d2->preference) {
     return d1->preference > d2->preference ? d1 : d2;
+  }
+
+  d1_cost = d1->preferred_parent != NULL ?
+    parent_path_cost(d1->preferred_parent) : d1->rank;
+  d2_cost = d2->preferred_parent != NULL ?
+    parent_path_cost(d2->preferred_parent) : d2->rank;
+  if(d1_cost != d2_cost) {
+    return d1_cost < d2_cost ? d1 : d2;
   }
 
   return d1->rank < d2->rank ? d1 : d2;
